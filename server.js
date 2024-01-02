@@ -41,7 +41,6 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
   fs.writeFileSync(tempInputFilePath, buffer);
 
   const originalVideoDetails = await getVideoDetails(tempInputFilePath);
-  console.log("Original Video Details:", originalVideoDetails.format);
 
   const command = ffmpeg()
     .input(tempInputFilePath)
@@ -53,17 +52,13 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
     .outputOptions("-strict", "experimental") // Necessary for certain codecs
     .outputOptions("-movflags", "frag_keyframe+empty_moov") // For streaming compatibility
     .toFormat("mp4") // Specify the output format
-    .on("start", (commandLine) => {
-      console.log("FFmpeg started with command:", commandLine);
-    })
-    .on("progress", (progress) => {
-      console.log("Processing: " + progress.percent.toFixed(2) + "% done");
+    .on("start", () => {
+      console.log("Compression Started");
     })
     .on("end", async () => {
       console.log("Compression finished");
 
       const compressedVideoDetails = await getVideoDetails(outputFileName);
-      console.log("Compressed Video Details:", compressedVideoDetails.format);
 
       const compressedVideoStream = fs.createReadStream(outputFileName);
 
@@ -73,14 +68,13 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
           console.error("Error getting file stats:", err);
         } else {
           // Set the response headers
-          res.status(200);
-          res.set({
-            "Content-Type": "video/mp4",
-            "Content-Length": stats.size, // Set the Content-Length header
+          res.status(200).json({
+            prev_bitrate: originalVideoDetails.format.bit_rate,
+            prev_fps: originalVideoDetails.streams[0].r_frame_rate,
+            recent_bitrate: compressedVideoDetails.format.bit_rate,
+            recent_fps: compressedVideoDetails.streams[0].r_frame_rate,
+            video: compressedVideoStream,
           });
-
-          // Pipe the compressed video stream directly to the response
-          compressedVideoStream.pipe(res);
 
           // Delete the temporary files after piping is done
           compressedVideoStream.on("end", () => {
