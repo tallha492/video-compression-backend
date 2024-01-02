@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const { Readable } = require("stream");
 const app = express();
 const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs");
@@ -15,7 +14,19 @@ app.use(cors());
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-app.post("/compress", upload.single("video"), (req, res) => {
+function getVideoDetails(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(metadata);
+      }
+    });
+  });
+}
+
+app.post("/api/compress", upload.single("video"), async (req, res) => {
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
   }
@@ -23,11 +34,14 @@ app.post("/compress", upload.single("video"), (req, res) => {
 
   const { buffer, originalname } = req.file;
 
-  const outputFileName = "compressed_" + originalname; // Specify a different output file name
+  const outputFileName = "compressed_" + originalname;
   const tempInputFilePath = path.join(__dirname, "temp_input.mp4");
 
   // Write the buffer to a temporary file
   fs.writeFileSync(tempInputFilePath, buffer);
+
+  const originalVideoDetails = await getVideoDetails(tempInputFilePath);
+  console.log("Original Video Details:", originalVideoDetails.format);
 
   const command = ffmpeg()
     .input(tempInputFilePath)
@@ -45,8 +59,11 @@ app.post("/compress", upload.single("video"), (req, res) => {
     .on("progress", (progress) => {
       console.log("Processing: " + progress.percent.toFixed(2) + "% done");
     })
-    .on("end", () => {
+    .on("end", async () => {
       console.log("Compression finished");
+
+      const compressedVideoDetails = await getVideoDetails(outputFileName);
+      console.log("Compressed Video Details:", compressedVideoDetails.format);
 
       const compressedVideoStream = fs.createReadStream(outputFileName);
 
