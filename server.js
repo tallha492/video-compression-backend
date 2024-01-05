@@ -26,6 +26,22 @@ function getVideoDetails(filePath) {
   });
 }
 
+app.post("/api/details", upload.single("video"), async (req, res) => {
+  const { buffer } = req.file;
+
+  const tempInputFilePath = path.join(__dirname, "temp_input.mp4");
+  // Write the buffer to a temporary file
+  fs.writeFileSync(tempInputFilePath, buffer);
+  const VideoDetails = await getVideoDetails(tempInputFilePath);
+
+  res.status(200).json({
+    bitrate: VideoDetails.format.bit_rate,
+    fps: VideoDetails.streams[0].r_frame_rate,
+  });
+
+  fs.unlinkSync(tempInputFilePath);
+});
+
 app.post("/api/compress", upload.single("video"), async (req, res) => {
   if (!req.file) {
     return res.status(400).send("No file uploaded.");
@@ -39,8 +55,6 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
 
   // Write the buffer to a temporary file
   fs.writeFileSync(tempInputFilePath, buffer);
-
-  const originalVideoDetails = await getVideoDetails(tempInputFilePath);
 
   const command = ffmpeg()
     .input(tempInputFilePath)
@@ -58,8 +72,6 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
     .on("end", async () => {
       console.log("Compression finished");
 
-      const compressedVideoDetails = await getVideoDetails(outputFileName);
-
       const compressedVideoStream = fs.createReadStream(outputFileName);
 
       // Use fs.stat to get file information
@@ -68,14 +80,13 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
           console.error("Error getting file stats:", err);
         } else {
           // Set the response headers
-          res.status(200).json({
-            prev_bitrate: originalVideoDetails.format.bit_rate,
-            prev_fps: originalVideoDetails.streams[0].r_frame_rate,
-            recent_bitrate: compressedVideoDetails.format.bit_rate,
-            recent_fps: compressedVideoDetails.streams[0].r_frame_rate,
-            video: compressedVideoStream,
+          res.status(200);
+          res.set({
+            "Content-Type": "video/mp4",
+            "Content-Length": stats.size, // Set the Content-Length header
           });
-
+          // Pipe the compressed video stream directly to the response
+          compressedVideoStream.pipe(res);
           // Delete the temporary files after piping is done
           compressedVideoStream.on("end", () => {
             fs.unlinkSync(tempInputFilePath);
