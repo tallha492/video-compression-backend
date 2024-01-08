@@ -30,16 +30,24 @@ app.post("/api/details", upload.single("video"), async (req, res) => {
   const { buffer } = req.file;
 
   const tempInputFilePath = path.join(__dirname, "temp_input.mp4");
+
   // Write the buffer to a temporary file
   fs.writeFileSync(tempInputFilePath, buffer);
-  const VideoDetails = await getVideoDetails(tempInputFilePath);
 
-  res.status(200).json({
-    bitrate: VideoDetails.format.bit_rate,
-    fps: VideoDetails.streams[0].r_frame_rate,
-  });
+  try {
+    const VideoDetails = await getVideoDetails(tempInputFilePath);
 
-  fs.unlinkSync(tempInputFilePath);
+    res.status(200).json({
+      bitrate: VideoDetails.format.bit_rate,
+      fps: VideoDetails.streams[0].r_frame_rate,
+    });
+  } catch (error) {
+    console.error("Error getting video details:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  } finally {
+    // Always unlink the temporary file
+    fs.unlinkSync(tempInputFilePath);
+  }
 });
 
 app.post("/api/compress", upload.single("video"), async (req, res) => {
