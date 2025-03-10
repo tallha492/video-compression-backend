@@ -27,85 +27,64 @@ function getVideoDetails(filePath) {
 }
 
 app.post("/api/details", upload.single("video"), async (req, res) => {
-  const { buffer } = req.file;
+  if (!req.file) return res.status(400).send("No file uploaded.");
 
-  const tempInputFilePath = path.join(__dirname, "temp_input.mp4");
+  const { buffer, originalname } = req.file;
+  const tempInputFilePath = path.join(__dirname, `temp_${originalname}`);
 
-  // Write the buffer to a temporary file
   fs.writeFileSync(tempInputFilePath, buffer);
 
   try {
-    const VideoDetails = await getVideoDetails(tempInputFilePath);
+    const videoDetails = await getVideoDetails(tempInputFilePath);
 
     res.status(200).json({
-      bitrate: VideoDetails.format.bit_rate,
-      fps: VideoDetails.streams[0].r_frame_rate,
+      format: videoDetails.format.format_name,
+      duration: videoDetails.format.duration,
+      bitrate: videoDetails.format.bit_rate,
+      fps: videoDetails.streams[0].r_frame_rate,
+      codec: videoDetails.streams[0].codec_name,
     });
   } catch (error) {
     console.error("Error getting video details:", error.message);
     res.status(500).json({ error: "Internal Server Error" });
   } finally {
-    // Always unlink the temporary file
     fs.unlinkSync(tempInputFilePath);
   }
 });
 
 app.post("/api/compress", upload.single("video"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).send("No file uploaded.");
-  }
-  const { fps, bitrate } = req.body;
+  if (!req.file) return res.status(400).send("No file uploaded.");
 
   const { buffer, originalname } = req.file;
+  const { fps, bitrate } = req.body;
 
-  const outputFileName = "compressed_" + originalname;
-  const tempInputFilePath = path.join(__dirname, "temp_input.mp4");
+  const tempInputFilePath = path.join(__dirname, `temp_${originalname}`);
+  const ext = path.extname(originalname);
+  const outputFileName = `compressed_${originalname}`;
+  const tempOutputFilePath = path.join(__dirname, outputFileName);
 
-  // Write the buffer to a temporary file
   fs.writeFileSync(tempInputFilePath, buffer);
 
-  const command = ffmpeg()
+  ffmpeg()
     .input(tempInputFilePath)
-    .audioBitrate(fps)
-    .videoBitrate(bitrate)
-    .output(outputFileName)
-    .outputOptions("-c:v", "libx264") // Use libx264 for better compatibility with base64
-    .outputOptions("-c:a", "aac") // Use AAC for audio
-    .outputOptions("-strict", "experimental") // Necessary for certain codecs
-    .outputOptions("-movflags", "frag_keyframe+empty_moov") // For streaming compatibility
-    .toFormat("mp4") // Specify the output format
-    .on("start", () => {
-      console.log("Compression Started");
-    })
+    .videoBitrate(bitrate || "1000k") // Default bitrate if not provided
+    .fps(fps || 30) // Default fps if not provided
+    .output(tempOutputFilePath)
+    .outputOptions("-preset", "fast") // Optimize for faster processing
+    .outputOptions("-movflags", "faststart") // Optimize for streaming
+    .on("start", () => console.log("Compression started..."))
     .on("end", async () => {
       console.log("Compression finished");
 
-      const compressedVideoStream = fs.createReadStream(outputFileName);
-
-      // Use fs.stat to get file information
-      fs.stat(outputFileName, (err, stats) => {
-        if (err) {
-          console.error("Error getting file stats:", err);
-        } else {
-          // Set the response headers
-          res.status(200);
-          res.set({
-            "Content-Type": "video/mp4",
-            "Content-Length": stats.size, // Set the Content-Length header
-          });
-          // Pipe the compressed video stream directly to the response
-          compressedVideoStream.pipe(res);
-          // Delete the temporary files after piping is done
-          compressedVideoStream.on("end", () => {
-            fs.unlinkSync(tempInputFilePath);
-            fs.unlinkSync(outputFileName);
-          });
-        }
+      res.download(tempOutputFilePath, outputFileName, (err) => {
+        if (err) console.error("Download error:", err);
+        fs.unlinkSync(tempInputFilePath);
+        fs.unlinkSync(tempOutputFilePath);
       });
     })
     .on("error", (err) => {
-      console.error("Error:", err);
-      res.status(500).send("Error occurred during compression");
+      console.error("Error during compression:", err);
+      res.status(500).send("Compression failed");
     })
     .run();
 });
