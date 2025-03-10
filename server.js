@@ -115,7 +115,7 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
   }
 
   // Get compression parameters from request
-  let { fps = "30", bitrate = "1000k", width, height } = req.body;
+  let { fps = "30", bitrate = "3000k", width, height } = req.body;
   const { buffer, originalname } = req.file;
 
   // Create unique temporary file paths with extensions
