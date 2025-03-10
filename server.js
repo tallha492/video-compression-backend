@@ -115,7 +115,7 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
   }
 
   // Get compression parameters from request
-  let { fps = "30", bitrate = "3000k", width, height } = req.body;
+  let { fps = "30", width, height } = req.body;
   const { buffer, originalname } = req.file;
 
   // Create unique temporary file paths with extensions
@@ -126,7 +126,6 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
     // Write buffer to temporary input file
     fs.writeFileSync(tempInputFilePath, buffer);
 
-    // Check if we have the format available
     console.log("Using output format: mp4");
 
     // Set up compression command
@@ -134,8 +133,7 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
 
     // Configure video settings
     command.videoCodec('libx264')
-      .videoBitrate(bitrate)
-      .fps(parseInt(fps));
+      .fps(parseInt(fps)); // Remove videoBitrate
 
     // Configure audio settings if needed
     command.audioCodec('aac')
@@ -163,7 +161,6 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
       })
       .on('error', (err) => {
         console.error('Compression error:', err);
-        // Schedule cleanup for later to avoid EBUSY
         setTimeout(() => cleanupFiles(tempInputFilePath, tempOutputFilePath), 1000);
         return res.status(500).json({ error: 'Video compression failed', details: err.message });
       })
@@ -171,33 +168,28 @@ app.post("/api/compress", upload.single("video"), async (req, res) => {
         console.log('Compression finished');
 
         try {
-          // Read the compressed file
           const compressedBuffer = fs.readFileSync(tempOutputFilePath);
 
-          // Set appropriate headers
           res.setHeader('Content-Type', 'video/mp4');
           res.setHeader('Content-Length', compressedBuffer.length);
           res.setHeader('Content-Disposition', `attachment; filename="compressed_${originalname}"`);
 
-          // Send the compressed video
           res.status(200).send(compressedBuffer);
 
-          // Schedule cleanup for later to avoid EBUSY
           setTimeout(() => cleanupFiles(tempInputFilePath, tempOutputFilePath), 2000);
         } catch (error) {
           console.error('Error sending compressed video:', error);
           res.status(500).json({ error: 'Failed to send compressed video' });
-          // Schedule cleanup for later to avoid EBUSY
           setTimeout(() => cleanupFiles(tempInputFilePath, tempOutputFilePath), 1000);
         }
       });
   } catch (error) {
     console.error('Unexpected error during compression:', error);
-    // Schedule cleanup for later to avoid EBUSY
     setTimeout(() => cleanupFiles(tempInputFilePath, tempOutputFilePath), 1000);
     res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
+
 
 // Add a route to check available formats
 app.get("/api/formats", (req, res) => {
