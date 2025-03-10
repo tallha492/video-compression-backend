@@ -53,41 +53,65 @@ app.post("/api/details", upload.single("video"), async (req, res) => {
 });
 
 app.post("/api/compress", upload.single("video"), async (req, res) => {
-  if (!req.file) return res.status(400).send("No file uploaded.");
-
-  const { buffer, originalname } = req.file;
+  if (!req.file) {
+    return res.status(400).send("No file uploaded.");
+  }
   const { fps, bitrate } = req.body;
 
-  const tempInputFilePath = path.join(__dirname, `temp_${originalname}`);
-  const ext = path.extname(originalname);
-  const outputFileName = `compressed_${originalname}`;
-  const tempOutputFilePath = path.join(__dirname, outputFileName);
+  const { buffer, originalname } = req.file;
 
+  const outputFileName = "compressed_" + originalname;
+  const tempInputFilePath = path.join(__dirname, "temp_input.mp4");
+
+  // Write the buffer to a temporary file
   fs.writeFileSync(tempInputFilePath, buffer);
 
-  ffmpeg()
+  const command = ffmpeg()
     .input(tempInputFilePath)
-    .videoBitrate(bitrate || "1000k") // Default bitrate if not provided
-    .fps(fps || 30) // Default fps if not provided
-    .output(tempOutputFilePath)
-    .outputOptions("-preset", "fast") // Optimize for faster processing
-    .outputOptions("-movflags", "faststart") // Optimize for streaming
-    .on("start", () => console.log("Compression started..."))
+    .audioBitrate(fps)
+    .videoBitrate(bitrate)
+    .output(outputFileName)
+    .outputOptions("-c:v", "libx264") // Use libx264 for better compatibility with base64
+    .outputOptions("-c:a", "aac") // Use AAC for audio
+    .outputOptions("-strict", "experimental") // Necessary for certain codecs
+    .outputOptions("-movflags", "frag_keyframe+empty_moov") // For streaming compatibility
+    .toFormat("mp4") // Specify the output format
+    .on("start", () => {
+      console.log("Compression Started");
+    })
     .on("end", async () => {
       console.log("Compression finished");
 
-      res.download(tempOutputFilePath, outputFileName, (err) => {
-        if (err) console.error("Download error:", err);
-        fs.unlinkSync(tempInputFilePath);
-        fs.unlinkSync(tempOutputFilePath);
+      const compressedVideoStream = fs.createReadStream(outputFileName);
+
+      // Use fs.stat to get file information
+      fs.stat(outputFileName, (err, stats) => {
+        if (err) {
+          console.error("Error getting file stats:", err);
+        } else {
+          // Set the response headers
+          res.status(200);
+          res.set({
+            "Content-Type": "video/mp4",
+            "Content-Length": stats.size, // Set the Content-Length header
+          });
+          // Pipe the compressed video stream directly to the response
+          compressedVideoStream.pipe(res);
+          // Delete the temporary files after piping is done
+          compressedVideoStream.on("end", () => {
+            fs.unlinkSync(tempInputFilePath);
+            fs.unlinkSync(outputFileName);
+          });
+        }
       });
     })
     .on("error", (err) => {
-      console.error("Error during compression:", err);
-      res.status(500).send("Compression failed");
+      console.error("Error:", err);
+      res.status(500).send("Error occurred during compression");
     })
     .run();
 });
+
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
